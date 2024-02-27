@@ -44,7 +44,7 @@ class Firewall:
 
                 elif element_type == "chain":
                     # TODO: add ipv6 support
-                    if not element["family"] == "ip":
+                    if not element["family"] in ("ip", "inet"):
                         continue
                     
                     ruleset[element["name"]] = {
@@ -57,7 +57,7 @@ class Firewall:
 
                 elif element_type == "rule":
                     # TODO: add ipv6 support
-                    if not element["family"] == "ip":
+                    if not element["family"] in ("ip", "inet"):
                         continue
                     
                     ruleset[element["chain"]]["rules"].append(element["expr"])
