@@ -14,7 +14,7 @@ This is a python package and CLI utiliy for simulating the flow of arbitrary net
 The package is currently not available on PyPI, but can be installed from github using pip:
 
 ```bash
-pip install https://github.com/MikPisula/packet-simulator
+pip install git+https://github.com/MikPisula/packet-simulator
 ```
 
 ## Usage
