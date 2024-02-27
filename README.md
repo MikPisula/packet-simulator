@@ -66,7 +66,6 @@ admin@server$ sudo bash remote.sh
 admin@server$ exit
 admin@laptop$ scp server:/tmp/{interfaces,routes,ruleset}.json ./
 admin@laptop$ packet-simulator -f interfaces.json -o routes.json -r ruleset.json -d 127.0.0.1
-router] Using route: 127.0.0.1/32 via lo
 [router] Using route: 127.0.0.1/32 via lo
 [firewall] hook output
 [firewall] enter chain OUTPUT
