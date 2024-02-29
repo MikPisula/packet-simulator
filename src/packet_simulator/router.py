@@ -28,48 +28,67 @@ class Router:
             interfaces = self.get_system_interfaces()
 
         self.interfaces = self.parse_interfaces(interfaces)
-        self.routes = self.parse_routes(routes)
+        self.tables = self.parse_routes(routes)
 
     def get_system_routes(self):
         ip_route = subprocess.run(
-            ["ip", "-j", "route", "show", "table", "all"], capture_output=True, text=True, check=True
+            ["ip", "-j", "route", "show", "table", "all"],
+            capture_output=True,
+            text=True,
+            check=True,
         )
 
         parsed_routes = json.loads(ip_route.stdout)
         return parsed_routes
 
     def parse_routes(self, raw_routes: dict):
-        routes = []
+        routes = {}
 
-        for parsed_route in raw_routes:
+        for raw_route in raw_routes:
             # TODO: refactor this to use a Route class
-            routes.append(
-                {
-                    "iface": parsed_route["dev"],
-                    "metric": (
-                        parsed_route["metric"] if "metric" in parsed_route else None
-                    ),
-                    "flags": parsed_route["flags"],
-                    "destination": (
-                        ipaddress.ip_network("0.0.0.0/0")
-                        if parsed_route["dst"] == "default"
-                        else ipaddress.ip_network(parsed_route["dst"])
-                    ),
-                    "gateway": (
-                        ipaddress.ip_address(parsed_route["gateway"])
-                        if "gateway" in parsed_route
-                        else None
-                    ),
-                    "prefsrc": (
-                        ipaddress.ip_address(parsed_route["prefsrc"])
-                        if "prefsrc" in parsed_route
-                        else None
-                    ),
-                    "scope": (
-                        parsed_route["scope"] if "scope" in parsed_route else "global"
-                    ),
-                }
+            # TODO: support blackhole routes
+
+            if "table" in raw_route:
+                table = raw_route["table"]
+            else:
+                table = "main"
+
+            if table not in routes:
+                routes[table] = []
+
+            route = {}
+
+            route["destination"] = (
+                ipaddress.ip_network("0.0.0.0/0")
+                if raw_route["dst"] == "default"
+                else ipaddress.ip_network(raw_route["dst"])
             )
+
+            if "type" in raw_route and raw_route["type"] == "blackhole":
+                route["type"] = "blackhole"
+            else:
+                route["iface"] = raw_route["dev"]
+
+            route["metric"] = raw_route["metric"] if "metric" in raw_route else None
+            route["flags"] = raw_route["flags"]
+            route["destination"] = (
+                ipaddress.ip_network("0.0.0.0/0")
+                if raw_route["dst"] == "default"
+                else ipaddress.ip_network(raw_route["dst"])
+            )
+            route["gateway"] = (
+                ipaddress.ip_address(raw_route["gateway"])
+                if "gateway" in raw_route
+                else None
+            )
+            route["prefsrc"] = (
+                ipaddress.ip_address(raw_route["prefsrc"])
+                if "prefsrc" in raw_route
+                else None
+            )
+            route["scope"] = raw_route["scope"] if "scope" in raw_route else "global"
+
+            routes[table].append(route)
 
         return routes
 
@@ -120,31 +139,24 @@ class Router:
     def route(self, packet: Packet) -> dict:
         packet_route = None
 
-        # TODO: delete this stupid obsolete code because it's stupid and obsolete
-        # for interface in self.interfaces:
-        #     for address in interface["addresses"]:
-        #         if packet.destination == address["address"]:
-        #             # this packet is destined for our host
-        #             # packet.iiface =
-        #             return None
-
         # http://linux-ip.net/html/routing-selection.html
         # TODO: support multiple routing tables
         # TODO: implement metrics
-        for route in self.routes:
-            if packet.destination in route["destination"]:
-                if packet_route == None:
-                    packet_route = route
-                elif (
-                    packet_route["destination"].prefixlen
-                    < route["destination"].prefixlen
-                ):
-                    packet_route = route
-                # elif (
-                #     packet_route["destination"].prefixlen
-                #     == route["destination"].prefixlen
-                # ):
-                #     raise Exception("How did this happen.")
+        for table in self.tables:
+            for route in table:
+                if packet.destination in table["destination"]:
+                    if packet_route == None:
+                        packet_route = table
+                    elif (
+                        packet_route["destination"].prefixlen
+                        < table["destination"].prefixlen
+                    ):
+                        packet_route = table
+                    # elif (
+                    #     packet_route["destination"].prefixlen
+                    #     == route["destination"].prefixlen
+                    # ):
+                    #     raise Exception("How did this happen.")
 
         packet.oiface = packet_route["iface"]
 
