@@ -24,8 +24,6 @@ class Simulator:
         # 1. check if packet originates from host. if the packet originates from host then send the packet to output -> postrouting
         # 2. check if the packet is destined for the host. prerouting -> input
 
-        # origin = local | external
-        # packet originates from host
         if packet.source is None:
             return self.resolve_outgoing(packet)
             # this function also has to ensure it has oiface AND does not have iiface
@@ -61,6 +59,8 @@ class Simulator:
                 for address in interface["addresses"]:
                     if packet.source in address["network"]:
                         packet.iiface = interface["iface"]
+
+        print(packet)
 
         prerouting_result = self.firewall.resolve_hook("prerouting", packet)
         print(f"[simulator] prerouting_result -> {prerouting_result}")

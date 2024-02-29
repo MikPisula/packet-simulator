@@ -20,15 +20,21 @@ from .packet import Packet
 
 # http://linux-ip.net/html/part-concepts.html
 class Router:
-    def __init__(self, interfaces: dict = None, routes: dict = None):
+    def __init__(
+        self, interfaces: dict = None, routes: dict = None, rules: dict = None
+    ):
         if routes is None:
             routes = self.get_system_routes()
 
         if interfaces is None:
             interfaces = self.get_system_interfaces()
 
+        if rules is None:
+            rules = self.get_system_rules()
+
         self.interfaces = self.parse_interfaces(interfaces)
         self.tables = self.parse_routes(routes)
+        self.rules = self.parse_rules(rules)
 
     def get_system_routes(self):
         ip_route = subprocess.run(
@@ -92,6 +98,34 @@ class Router:
 
         return routes
 
+    def get_system_rules(self):
+        ip_route = subprocess.run(
+            ["ip", "-j", "rule", "list"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        parsed_rules = json.loads(ip_route.stdout)
+        return parsed_rules
+
+    def parse_rules(self, raw_rules: dict):
+        rules = []
+
+        for raw_rule in raw_rules:
+            rule = {}
+            rule["src"] = (
+                ipaddress.ip_network("0.0.0.0/0")
+                if raw_rule["src"] == "all"
+                else ipaddress.ip_network(raw_rule["src"])
+            )
+            rule["fwmark"] = raw_rule["fwmark"] if "fwmark" in rule else None
+            rule["table"] = raw_rule["table"]
+
+            rules.append(rule)
+
+        return rules
+
     def get_system_interfaces(self):
         ip_address = subprocess.run(
             ["ip", "-j", "address"], capture_output=True, text=True, check=True
@@ -141,22 +175,41 @@ class Router:
 
         # http://linux-ip.net/html/routing-selection.html
         # TODO: support multiple routing tables
-        # TODO: implement metrics
-        for table in self.tables:
-            for route in table:
-                if packet.destination in table["destination"]:
+
+        table = None
+
+        # TODO: suppress_prefixlength NUMBER - reject routing decisions that have a prefix length of NUMBER or less.
+        #    Each policy routing rule consists of a selector and an action predicate.  The RPDB is scanned in order of decreasing priority (note that a lower number means higher priority, see the description of PREFERENCE below). The se‐
+        #    lector of each rule is applied to {source address, destination address, incoming interface, tos, fwmark} and, if the selector matches the packet, the action is performed. The action predicate may return with success.  In this
+        #    case, it will either give a route or failure indication and the RPDB lookup is terminated. Otherwise, the RPDB program continues with the next rule.
+        for rule in self.rules:
+            if packet_route is not None:
+                break
+
+            # TODO: this ignores packets originating from the host
+            if packet.source is not None and packet.source not in rule["src"]:
+                continue
+
+            # if 'fwmark' in rule and rule['fwmark'] and not packet.fwmark == rule["fwmark"]:
+            #     rule["fwmark"]
+            #     continue
+
+            for route in self.tables[rule["table"]]:
+                if packet.destination in route["destination"]:
+
+                    # TODO: implement metrics
                     if packet_route == None:
-                        packet_route = table
+                        packet_route = route
                     elif (
                         packet_route["destination"].prefixlen
-                        < table["destination"].prefixlen
+                        < route["destination"].prefixlen
                     ):
-                        packet_route = table
-                    # elif (
-                    #     packet_route["destination"].prefixlen
-                    #     == route["destination"].prefixlen
-                    # ):
-                    #     raise Exception("How did this happen.")
+                        packet_route = route
+                    elif (
+                        packet_route["destination"].prefixlen
+                        == route["destination"].prefixlen
+                    ):
+                        raise Exception("How did this happen.")
 
         packet.oiface = packet_route["iface"]
 

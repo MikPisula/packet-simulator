@@ -39,28 +39,34 @@ class Firewall:
                     pass
 
                 elif element_type == "table":
-                    # TODO: currently ignored
-                    pass
+                    family = element["family"]
+
+                    if family not in ruleset:
+                        ruleset[family] = {}
+
+                    ruleset[family][element["name"]] = {}
 
                 elif element_type == "chain":
-                    # TODO: add ipv6 support
-                    if not element["family"] in ("ip", "inet"):
-                        continue
-                    
-                    ruleset[element["name"]] = {
+                    ruleset[element["family"]][element["table"]][element["name"]] = {
                         "name": element["name"],
                         "rules": [],
                         "hook": element["hook"] if "hook" in element else None,
                         "policy": element["policy"] if "policy" in element else None,
+                        "priority": element["prio"] if "prio" in element else None,
                         "table": element["table"],
+                        "family": element["family"],
                     }
 
                 elif element_type == "rule":
-                    # TODO: add ipv6 support
-                    if not element["family"] in ("ip", "inet"):
-                        continue
-                    
-                    ruleset[element["chain"]]["rules"].append(element["expr"])
+                    ruleset[element["family"]][element["table"]][element["chain"]][
+                        "rules"
+                    ].append(
+                        {
+                            "expr": element["expr"],
+                            "table": element["table"],
+                            "family": element["family"],
+                        }
+                    )
 
                 else:
                     raise Exception(f"Unknown ruleset element_type: {element_type}")
@@ -97,6 +103,9 @@ class Firewall:
                 else raw_expression
             )
 
+        elif isinstance(raw_expression, int):
+            return raw_expression
+
         ((expression_type, expression),) = raw_expression.items()
 
         # TODO: add conntrack tool support
@@ -128,6 +137,9 @@ class Firewall:
             elif meta_key == "iifname":
                 return packet.iiface
 
+            elif meta_key == "mark":
+                return packet.fwmark
+
             elif meta_key == "nfproto":
                 return (
                     "ip4" if isinstance(packet.source, ipaddress.IPv4Address) else "ip6"
@@ -155,19 +167,42 @@ class Firewall:
                         return None
 
                     if field == "daddr":
-                        return packet.source
+                        return packet.destination
+
+                    elif field == "saddr":
+                        return packet.destination
+
+                    elif field == "protocol":
+                        return packet.proto
+
+                    else:
+                        raise Exception(f"Unknown field {expression}")
+
+                if protocol == "ip":
+                    if not isinstance(packet.destination, ipaddress.IPv4Address):
+                        return None
+
+                    if field == "daddr":
+                        return packet.destination
+
+                    elif field == "saddr":
+                        return packet.destination
+
+                    elif field == "protocol":
+                        return packet.proto
+
                     else:
                         raise Exception(f"Unknown field {expression}")
 
                 elif protocol == "icmpv6":
-                    if not packet.proto == "icmpv6":
+                    if packet.proto != "icmpv6":
                         return None
 
                     # TODO:
                     return None
 
                 elif protocol == "tcp":
-                    if not packet.proto == "tcp":
+                    if packet.proto != "tcp":
                         return None
 
                     if field == "dport":
@@ -177,7 +212,7 @@ class Firewall:
                         return packet.sport
 
                 elif protocol == "udp":
-                    if not packet.proto == "udp":
+                    if packet.proto != "udp":
                         return None
 
                     if field == "dport":
@@ -193,7 +228,12 @@ class Firewall:
                 raise Exception(f'Unknown payload {expression["payload"]}')
 
         elif expression_type == "prefix":
-            return ipaddress.IPv6Network((expression["addr"], expression["len"]))
+            if isinstance(
+                ipaddress.ip_address(expression["addr"]), ipaddress.IPv6Address
+            ):
+                return ipaddress.IPv6Network((expression["addr"], expression["len"]))
+            else:
+                return ipaddress.IPv4Network((expression["addr"], expression["len"]))
 
         elif expression_type == "range":
             return range(expression[0], expression[1] + 1)
@@ -212,7 +252,12 @@ class Firewall:
         if isinstance(left, list):
             raise Exception(f"Unsupported expression on LHS {right}")
 
-        elif isinstance(right, list) or isinstance(right, range):
+        elif (
+            isinstance(right, list)
+            or isinstance(right, range)
+            or isinstance(right, ipaddress.IPv4Network)
+            or isinstance(right, ipaddress.IPv6Network)
+        ):
             if operator == "==":
                 result = left in right
 
@@ -223,6 +268,11 @@ class Firewall:
                 raise Exception(f"Unknown operator {operator}")
 
         else:
+            # TODO: interface globbing, i.e. wlan*
+            # Like with iptables, wildcard matching on interface name prefixes is available for iifname and oifname matches
+            # by appending an asterisk (*) character. Note however that unlike iptables, nftables does not accept interface
+            # names consisting of the wildcard character only - users are supposed to just skip those always matching
+            # expressions. In order to match on literal asterisk character, one may escape it using backslash (\).
             if operator == "==":
                 result = right == left
 
@@ -239,13 +289,18 @@ class Firewall:
         return result
 
     def _resolve_rule(self, rule: dict, packet: Packet):
-        for raw_expression in rule:
+        # print(rule["expr"])
+        for raw_expression in rule["expr"]:
             for expression_type, expression in raw_expression.items():
                 if expression_type == "jump":
                     print(f"[firewall] jump to chain {expression['target']}")
 
-                    return self._resolve_chain(expression["target"], packet)
-                    # self._resolve_chain()
+                    return self._resolve_chain(
+                        self.ruleset[rule["family"]][rule["table"]][
+                            expression["target"]
+                        ],
+                        packet,
+                    )
 
                 elif expression_type == "match":
                     if self._resolve_match(expression, packet) == True:
@@ -260,18 +315,32 @@ class Firewall:
 
                 elif expression_type == "return":
                     print(f"[firewall] return")
-                    # print(f"[firewall] jump to chain {expression['target']}")
                     return None
-                
-                elif expression_type in ("counter", "xt"):
+
+                elif expression_type == "xt":
+                    print(f"[firewall] {expression_type}")
+
+                    if expression["name"] in ("owner", "cgroup"):
+                        print(
+                            f"[firewall] Warning: Ignoring {expression['name']} extension"
+                        )
+                        return
+
+                    else:
+                        raise Exception(f"Unknown extension {expression['name']}")
+
+                if expression_type == "counter":
                     continue
 
                 else:
                     raise Exception(f"Unknown rule expression_type {expression_type}")
 
-    def _resolve_chain(self, chain: str, packet: Packet):
-        print(f"[firewall] enter chain {chain}")
-        for rule in self.ruleset[chain]["rules"]:
+    def _resolve_chain(self, chain: dict, packet: Packet):
+        print(f"[firewall] enter chain {chain['name']}")
+
+        for rule in self.ruleset[chain["family"]][chain["table"]][chain["name"]][
+            "rules"
+        ]:
             value = self._resolve_rule(rule, packet)
 
             if value is not None:
@@ -280,19 +349,35 @@ class Firewall:
     # https://wiki.nftables.org/wiki-nftables/index.php/Netfilter_hooks
     def resolve_hook(self, hook: str, packet: Packet):
         print(f"[firewall] hook {hook}")
-        
+
+        hooks = []
+
+        for tables in self.ruleset.values():
+            for chains in tables.values():
+                for chain in chains.values():
+                    if chain["hook"] == hook:
+                        hooks.append(chain)
+
+        hooks = sorted(hooks, key=lambda c: c["priority"])
+
         result = None
 
-        for chain in self.ruleset.values():
-            if chain["hook"] == hook:
-                result = self._resolve_chain(chain["name"], packet)
+        for hook in hooks:
+            if not hook["family"] == "inet" and not hook["family"] == (
+                "ip6" if isinstance(packet.source, ipaddress.IPv6Address) else "ip"
+            ):
+                continue
 
-                if result is None:
-                    result = chain["policy"]
+            chain_result = self._resolve_chain(hook, packet)
 
-                print(f'[firewall] {chain["name"]} -> {result}')
+            if chain_result is None:
+                result = hook["policy"]
+            else:
+                result = chain_result
 
-                if result in ("reject", "drop"):
-                    return result
+            print(f'[firewall] {hook["name"]} -> {result}')
+
+            if result in ("reject", "drop"):
+                return result
 
         return result
