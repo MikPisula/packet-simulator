@@ -1,2 +1,12 @@
+build/
+dist/
+*.egg-info/
+*.egg
+*.py[cod]
+__pycache__/
+*.so
+*~
+
 .venv
-__pycache__
+.tox
+.cache
