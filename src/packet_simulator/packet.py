@@ -25,5 +25,7 @@ class Packet:
 
         self.fwmark = 0x0
 
+        self.route = None
+
     def __repr__(self):
         return f"{self.__class__.__name__}(source={self.source}, destination={self.destination}, proto={self.proto}, sport={self.sport}, dport={self.dport}, iiface={self.iiface}, oiface={self.oiface}, ct={self.ct}, icmp={self.icmp})"

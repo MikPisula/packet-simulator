@@ -60,8 +60,6 @@ class Simulator:
                     if packet.source in address["network"]:
                         packet.iiface = interface["iface"]
 
-        print(packet)
-
         prerouting_result = self.firewall.resolve_hook("prerouting", packet)
         print(f"[simulator] prerouting_result -> {prerouting_result}")
 

@@ -171,7 +171,7 @@ class Router:
         return interfaces
 
     def route(self, packet: Packet) -> dict:
-        packet_route = None
+        packet.route = None
 
         # http://linux-ip.net/html/routing-selection.html
         # TODO: support multiple routing tables
@@ -183,7 +183,7 @@ class Router:
         #    lector of each rule is applied to {source address, destination address, incoming interface, tos, fwmark} and, if the selector matches the packet, the action is performed. The action predicate may return with success.  In this
         #    case, it will either give a route or failure indication and the RPDB lookup is terminated. Otherwise, the RPDB program continues with the next rule.
         for rule in self.rules:
-            if packet_route is not None:
+            if packet.route is not None:
                 break
 
             # TODO: this ignores packets originating from the host
@@ -198,27 +198,27 @@ class Router:
                 if packet.destination in route["destination"]:
 
                     # TODO: implement metrics
-                    if packet_route == None:
-                        packet_route = route
+                    if packet.route == None:
+                        packet.route = route
                     elif (
-                        packet_route["destination"].prefixlen
+                        packet.route["destination"].prefixlen
                         < route["destination"].prefixlen
                     ):
-                        packet_route = route
+                        packet.route = route
                     elif (
-                        packet_route["destination"].prefixlen
+                        packet.route["destination"].prefixlen
                         == route["destination"].prefixlen
                     ):
                         raise Exception("How did this happen.")
 
-        packet.oiface = packet_route["iface"]
+        packet.oiface = packet.route["iface"]
 
         print(
-            f"[router] Using route: {packet_route['destination']} via {packet_route['iface']}"
+            f"[router] Using route: {packet.route['destination']} via {packet.route['iface']}"
         )
 
-        if packet_route == None:
+        if packet.route == None:
             raise Exception(f"No route to {packet.destination} could be found.")
 
         # TODO: refactor to use Route class
-        return packet_route
+        return packet.route

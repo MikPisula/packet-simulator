@@ -145,7 +145,9 @@ class Firewall:
 
             elif meta_key == "nfproto":
                 return (
-                    "ip4" if isinstance(packet.source, ipaddress.IPv4Address) else "ip6"
+                    "ipv4"
+                    if isinstance(packet.source, ipaddress.IPv4Address)
+                    else "ipv6"
                 )
 
             elif meta_key == "l4proto":
@@ -334,8 +336,11 @@ class Firewall:
                     else:
                         raise Exception(f"Unknown extension {expression['name']}")
 
-                if expression_type == "counter":
+                elif expression_type == "counter":
                     continue
+
+                elif expression_type == "masquerade":
+                    packet.source = packet.route["prefsrc"]
 
                 else:
                     raise Exception(f"Unknown rule expression_type {expression_type}")
