@@ -68,6 +68,9 @@ class Firewall:
                         }
                     )
 
+                elif element_type == "ct helper":
+                    continue
+
                 else:
                     raise Exception(f"Unknown ruleset element_type: {element_type}")
 
@@ -144,6 +147,9 @@ class Firewall:
                 return (
                     "ip4" if isinstance(packet.source, ipaddress.IPv4Address) else "ip6"
                 )
+
+            elif meta_key == "l4proto":
+                return packet.proto
 
             else:
                 raise Exception(f"Unknown meta_key: {meta_key}")
@@ -259,10 +265,10 @@ class Firewall:
             or isinstance(right, ipaddress.IPv6Network)
         ):
             if operator == "==":
-                result = left in right
+                result = left is not None and left in right
 
             elif operator == "!=":
-                result = not left in right
+                result = left is None or not left in right
 
             else:
                 raise Exception(f"Unknown operator {operator}")
@@ -289,7 +295,6 @@ class Firewall:
         return result
 
     def _resolve_rule(self, rule: dict, packet: Packet):
-        # print(rule["expr"])
         for raw_expression in rule["expr"]:
             for expression_type, expression in raw_expression.items():
                 if expression_type == "jump":
