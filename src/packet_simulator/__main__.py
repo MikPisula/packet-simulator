@@ -57,6 +57,14 @@ def main():
         "-f", "--interfaces", help="Interface table (`ip -j address show` output)"
     )
 
+    parser.add_argument(
+        "-e",
+        "--state",
+        help="Packet conntrack state",
+        type=str,
+        choices=("new", "established", "related", "invalid"),
+    )
+
     args = parser.parse_args()
 
     ruleset = None
@@ -97,6 +105,9 @@ def main():
         packet.proto = "icmp"
         packet.icmp["type"] = args.type
         packet.icmp["code"] = args.code
+
+    if args.state:
+        packet.ct["state"] = args.state
 
     simulator.simulate(packet)
 
